@@ -247,7 +247,7 @@ def _check_sigs_on_pdus(keyring, pdus):
         PduToCheckSig(
             pdu=p,
             redacted_pdu_json=prune_event(p).get_pdu_json(),
-            event_id_domain=get_domain_from_id(p.event_id),
+            event_id_domain=p.origin,
             sender_domain=get_domain_from_id(p.sender),
             deferreds=[],
         )
@@ -319,7 +319,7 @@ def event_from_pdu_json(pdu_json, event_format_version, outlier=False):
     """
     # we could probably enforce a bunch of other fields here (room_id, sender,
     # origin, etc etc)
-    assert_params_in_dict(pdu_json, ('event_id', 'type', 'depth'))
+    assert_params_in_dict(pdu_json, ('type', 'depth'))
 
     depth = pdu_json['depth']
     if not isinstance(depth, six.integer_types):

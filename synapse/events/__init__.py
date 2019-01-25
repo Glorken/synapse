@@ -18,10 +18,13 @@ from distutils.util import strtobool
 
 import six
 
+from unpaddedbase64 import encode_base64
+
 from synapse.api.constants import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     KNOWN_ROOM_VERSIONS,
     EventFormatVersions,
+    RoomVersions,
 )
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
@@ -225,22 +228,89 @@ class FrozenEvent(EventBase):
             rejected_reason=rejected_reason,
         )
 
-    @staticmethod
-    def from_event(event):
-        e = FrozenEvent(
-            event.get_pdu_json()
-        )
-
-        e.internal_metadata = event.internal_metadata
-
-        return e
-
     def __str__(self):
         return self.__repr__()
 
     def __repr__(self):
         return "<FrozenEvent event_id='%s', type='%s', state_key='%s'>" % (
             self.get("event_id", None),
+            self.get("type", None),
+            self.get("state_key", None),
+        )
+
+
+class FrozenEventV2(EventBase):
+    format_version = EventFormatVersions.V2  # All events of this type are V2
+
+    def __init__(self, event_dict, internal_metadata_dict={}, rejected_reason=None):
+        event_dict = dict(event_dict)
+
+        # Signatures is a dict of dicts, and this is faster than doing a
+        # copy.deepcopy
+        signatures = {
+            name: {sig_id: sig for sig_id, sig in sigs.items()}
+            for name, sigs in event_dict.pop("signatures", {}).items()
+        }
+
+        assert "event_id" not in event_dict
+
+        unsigned = dict(event_dict.pop("unsigned", {}))
+
+        # We intern these strings because they turn up a lot (especially when
+        # caching).
+        event_dict = intern_dict(event_dict)
+
+        if USE_FROZEN_DICTS:
+            frozen_dict = freeze(event_dict)
+        else:
+            frozen_dict = event_dict
+
+        self._event_id = None
+        self.type = event_dict["type"]
+        if "state_key" in event_dict:
+            self.state_key = event_dict["state_key"]
+
+        super(FrozenEventV2, self).__init__(
+            frozen_dict,
+            signatures=signatures,
+            unsigned=unsigned,
+            internal_metadata_dict=internal_metadata_dict,
+            rejected_reason=rejected_reason,
+        )
+
+    @property
+    def event_id(self):
+        # FIXME
+        from synapse.crypto.event_signing import compute_event_reference_hash
+        if self._event_id:
+            return self._event_id
+        self._event_id = "$" + encode_base64(compute_event_reference_hash(self)[1])
+        return self._event_id
+
+    def prev_event_ids(self):
+        """Returns the list of prev event IDs. The order matches the order
+        specified in the event, though there is no meaning to it.
+
+        Returns:
+            list[str]: The list of event IDs of this event's prev_events
+        """
+        return self.prev_events
+
+    def auth_event_ids(self):
+        """Returns the list of auth event IDs. The order matches the order
+        specified in the event, though there is no meaning to it.
+
+        Returns:
+            list[str]: The list of event IDs of this event's auth_events
+        """
+        return self.auth_events
+
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        return "<FrozenEventV2 event_id='%s', type='%s', state_key='%s'>" % (
+            self.event_id,
             self.get("type", None),
             self.get("state_key", None),
         )
@@ -259,7 +329,10 @@ def room_version_to_event_format(room_version):
         # We should have already checked version, so this should not happen
         raise RuntimeError("Unrecognized room version %s" % (room_version,))
 
-    return EventFormatVersions.V1
+    if room_version != RoomVersions.V2:
+        return EventFormatVersions.V1
+    else:
+        return EventFormatVersions.V2
 
 
 def event_type_from_format_version(format_version):
@@ -277,4 +350,8 @@ def event_type_from_format_version(format_version):
         raise Exception(
             "No event format %r" % (format_version,)
         )
-    return FrozenEvent
+
+    if format_version != EventFormatVersions.V2:
+        return FrozenEvent
+    else:
+        return FrozenEventV2

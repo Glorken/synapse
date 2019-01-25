@@ -563,6 +563,10 @@ class EventCreationHandler(object):
 
         self.validator.validate_new(event)
 
+        context = yield self.state.compute_event_context(event)
+        if requester:
+            context.app_service = requester.app_service
+
         logger.debug(
             "Created event %s",
             event.event_id,

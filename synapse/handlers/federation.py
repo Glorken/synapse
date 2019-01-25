@@ -2292,6 +2292,8 @@ class FederationHandler(BaseHandler):
                 room_version, event_dict, event, context
             )
 
+            event.internal_metadata.send_on_behalf_of = get_domain_from_id(target_user_id)
+
             try:
                 yield self.auth.check_from_context(room_version, event, context)
             except AuthError as e:
@@ -2340,6 +2342,8 @@ class FederationHandler(BaseHandler):
             logger.warn("Denying third party invite %r because %s", event, e)
             raise e
         yield self._check_signature(event, context)
+
+        event.internal_metadata.send_on_behalf_of = get_domain_from_id(event.sender)
 
         # XXX we send the invite here, but send_membership_event also sends it,
         # so we end up making two requests. I think this is redundant.

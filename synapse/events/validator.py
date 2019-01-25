@@ -15,7 +15,7 @@
 
 from six import string_types
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventFormatVersions, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.types import EventID, RoomID, UserID
 
@@ -23,7 +23,8 @@ from synapse.types import EventID, RoomID, UserID
 class EventValidator(object):
 
     def validate(self, event):
-        EventID.from_string(event.event_id)
+        if event.format_version != EventFormatVersions.V2:
+            EventID.from_string(event.event_id)
 
         required = [
             "auth_events",

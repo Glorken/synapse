@@ -17,7 +17,11 @@ import attr
 
 from twisted.internet import defer
 
-from synapse.api.constants import KNOWN_ROOM_VERSIONS, KNOWN_EVENT_FORMAT_VERSIONS
+from synapse.api.constants import (
+    KNOWN_EVENT_FORMAT_VERSIONS,
+    KNOWN_ROOM_VERSIONS,
+    EventFormatVersions,
+)
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.types import EventID
 from synapse.util.stringutils import random_string
@@ -87,8 +91,12 @@ class EventBuilder(object):
 
         store = self._builder_factory.store
 
-        auth_events = yield store.add_event_hashes(auth_ids)
-        prev_events = yield store.add_event_hashes(prev_event_ids)
+        if self.format_version == EventFormatVersions.V1:
+            auth_events = yield store.add_event_hashes(auth_ids)
+            prev_events = yield store.add_event_hashes(prev_event_ids)
+        else:
+            auth_events = auth_ids
+            prev_events = prev_event_ids
 
         old_depth = yield store.get_max_depth_of(
             prev_event_ids,
@@ -202,7 +210,8 @@ class EventBuilderFactory(object):
 
         time_now = int(self.clock.time_msec())
 
-        event_dict["event_id"] = self.create_event_id()
+        if format_version == EventFormatVersions.V1:
+            event_dict["event_id"] = self.create_event_id()
 
         event_dict["origin"] = self.hostname
         event_dict["origin_server_ts"] = time_now

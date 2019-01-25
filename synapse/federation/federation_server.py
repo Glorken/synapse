@@ -620,7 +620,7 @@ class FederationServer(FederationBase):
         """
         # check that it's actually being sent from a valid destination to
         # workaround bug #1753 in 0.18.5 and 0.18.6
-        if origin != get_domain_from_id(pdu.event_id):
+        if origin != get_domain_from_id(pdu.sender):
             # We continue to accept join events from any server; this is
             # necessary for the federation join dance to work correctly.
             # (When we join over federation, the "helper" server is
@@ -629,7 +629,7 @@ class FederationServer(FederationBase):
             if not (
                 pdu.type == 'm.room.member' and
                 pdu.content and
-                pdu.content.get("membership", None) == 'join'
+                pdu.content.get("membership", None) in ['join', 'invite']
             ):
                 logger.info(
                     "Discarding PDU %s from invalid origin %s",

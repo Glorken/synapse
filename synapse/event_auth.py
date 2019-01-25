@@ -49,7 +49,6 @@ def check(room_version, event, auth_events, do_sig_check=True, do_size_check=Tru
 
     if do_sig_check:
         sender_domain = get_domain_from_id(event.sender)
-        event_id_domain = get_domain_from_id(event.event_id)
 
         is_invite_via_3pid = (
             event.type == EventTypes.Member
@@ -65,10 +64,6 @@ def check(room_version, event, auth_events, do_sig_check=True, do_size_check=Tru
             # other dedicated membership checks.
             if not is_invite_via_3pid:
                 raise AuthError(403, "Event not signed by sender's server")
-
-        # Check the event_id's domain has signed the event
-        if not event.signatures.get(event_id_domain):
-            raise AuthError(403, "Event not signed by sending server")
 
     if auth_events is None:
         # Oh, we don't know what the state of the room was, so we
@@ -442,6 +437,7 @@ def check_redaction(event, auth_events):
     if user_level >= redact_level:
         return False
 
+    # FIXME: Update to support event format v2
     redacter_domain = get_domain_from_id(event.event_id)
     redactee_domain = get_domain_from_id(event.redacts)
     if redacter_domain == redactee_domain:

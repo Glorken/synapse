@@ -741,13 +741,19 @@ class FederationClient(FederationBase):
 
     @defer.inlineCallbacks
     def send_invite(self, destination, room_id, event_id, pdu):
+        room_version = yield self.store.get_room_version(room_id)
+
         time_now = self._clock.time_msec()
         try:
-            code, content = yield self.transport_layer.send_invite(
+            content = yield self.transport_layer.send_invite(
                 destination=destination,
                 room_id=room_id,
                 event_id=event_id,
-                content=pdu.get_pdu_json(time_now),
+                content={
+                    "event": pdu.get_pdu_json(time_now),
+                    "room_version": room_version,
+                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                },
             )
         except HttpResponseException as e:
             if e.code == 403:
@@ -758,7 +764,6 @@ class FederationClient(FederationBase):
 
         logger.debug("Got response to send_invite: %s", pdu_dict)
 
-        room_version = yield self.store.get_room_version(room_id)
         format_ver = room_version_to_event_format(room_version)
 
         pdu = event_from_pdu_json(pdu_dict, format_ver)
