@@ -17,7 +17,7 @@ import attr
 
 from twisted.internet import defer
 
-from synapse.api.constants import KNOWN_ROOM_VERSIONS, KNOWN_EVENT_FORMAT_VERSIONS
+from synapse.api.constants import KNOWN_EVENT_FORMAT_VERSIONS, KNOWN_ROOM_VERSIONS
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.types import EventID
 from synapse.util.stringutils import random_string
