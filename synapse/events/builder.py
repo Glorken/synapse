@@ -47,15 +47,15 @@ class EventBuilder(object):
     type = attr.ib()
     sender = attr.ib()
 
-    content = attr.ib(factory=dict)
-    unsigned = attr.ib(factory=dict)
+    content = attr.ib(default=attr.Factory(dict))
+    unsigned = attr.ib(default=attr.Factory(dict))
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
     _state_key = attr.ib(default=None)
     _redacts = attr.ib(default=None)
 
-    internal_metadata = attr.ib(factory=lambda: _EventInternalMetadata({}))
+    internal_metadata = attr.ib(default=attr.Factory(lambda: _EventInternalMetadata({})))
 
     @property
     def state_key(self):
