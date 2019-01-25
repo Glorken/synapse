@@ -31,7 +31,6 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.api.urls import ConsentURIBuilder
-from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events.utils import serialize_event
 from synapse.events.validator import EventValidator
 from synapse.replication.http.send_event import ReplicationSendEventRestServlet
@@ -557,26 +556,12 @@ class EventCreationHandler(object):
             for event_id, prev_hashes, _ in prev_events_and_hashes
         ]
 
-        builder.prev_events = prev_events
-        builder.depth = depth
-
-        context = yield self.state.compute_event_context(builder)
-        if requester:
-            context.app_service = requester.app_service
-
-        if builder.is_state():
-            builder.prev_state = yield self.store.add_event_hashes(
-                context.prev_state_events
-            )
-
-        yield self.auth.add_auth_events(builder, context)
-
-        signing_key = self.hs.config.signing_key[0]
-        add_hashes_and_signatures(
-            builder, self.server_name, signing_key
+        event = yield builder.build(
+            prev_event_ids=[p for p, _ in prev_events],
         )
+        context = yield self.state.compute_event_context(event)
 
-        event = builder.build()
+        self.validator.validate_new(event)
 
         logger.debug(
             "Created event %s",

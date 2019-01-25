@@ -13,65 +13,124 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
+import attr
 
-from synapse.api.constants import RoomVersions
+from twisted.internet import defer
+
+from synapse.api.constants import KNOWN_ROOM_VERSIONS, KNOWN_EVENT_FORMAT_VERSIONS
+from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.types import EventID
 from synapse.util.stringutils import random_string
 
-from . import EventBase, FrozenEvent, _event_dict_property
+from . import (
+    _EventInternalMetadata,
+    event_type_from_format_version,
+    room_version_to_event_format,
+)
 
 
-def get_event_builder(room_version, key_values={}, internal_metadata_dict={}):
-    """Generate an event builder appropriate for the given room version
+@attr.s(slots=True, hash=False, frozen=True)
+class EventBuilder(object):
+    """A format independent event builder used to build up the event content
+    before signing the event.
 
-    Args:
-        room_version (str): Version of the room that we're creating an
-            event builder for
-        key_values (dict): Fields used as the basis of the new event
-        internal_metadata_dict (dict): Used to create the `_EventInternalMetadata`
-            object.
-
-    Returns:
-        EventBuilder
+    (Note that while this class is frozen, content/unsigned/internal_metadata
+    are still mutable)
     """
-    if room_version in {
-        RoomVersions.V1,
-        RoomVersions.V2,
-        RoomVersions.VDH_TEST,
-        RoomVersions.STATE_V2_TEST,
-    }:
-        return EventBuilder(key_values, internal_metadata_dict)
-    else:
-        raise Exception(
-            "No event format defined for version %r" % (room_version,)
+
+    # An EventBuilderFactory
+    _builder_factory = attr.ib()
+
+    format_version = attr.ib()
+
+    room_id = attr.ib()
+    type = attr.ib()
+    sender = attr.ib()
+
+    content = attr.ib(factory=dict)
+    unsigned = attr.ib(factory=dict)
+
+    # These only exist on a subset of events, so they raise AttributeError if
+    # someone tries to get them when they don't exist.
+    _state_key = attr.ib(default=None)
+    _redacts = attr.ib(default=None)
+
+    internal_metadata = attr.ib(factory=lambda: _EventInternalMetadata({}))
+
+    @property
+    def state_key(self):
+        if self._state_key is not None:
+            return self._state_key
+
+        raise AttributeError("state_key")
+
+    def is_state(self):
+        return self._state_key is not None
+
+    @defer.inlineCallbacks
+    def build(self, prev_event_ids):
+        """Transform into a fully signed and hashed event
+
+        Args:
+            prev_event_ids (list[str]): The event IDs to use as the prev events
+
+        Returns:
+            Deferred[FrozenEvent]
+        """
+
+        state_ids = yield self._builder_factory.state.get_current_state_ids(
+            self.room_id, prev_event_ids,
+        )
+        auth_ids = yield self._builder_factory.auth.compute_auth_events(
+            self, state_ids,
         )
 
+        store = self._builder_factory.store
 
-class EventBuilder(EventBase):
-    def __init__(self, key_values={}, internal_metadata_dict={}):
-        signatures = copy.deepcopy(key_values.pop("signatures", {}))
-        unsigned = copy.deepcopy(key_values.pop("unsigned", {}))
+        auth_events = yield store.add_event_hashes(auth_ids)
+        prev_events = yield store.add_event_hashes(prev_event_ids)
 
-        super(EventBuilder, self).__init__(
-            key_values,
-            signatures=signatures,
-            unsigned=unsigned,
-            internal_metadata_dict=internal_metadata_dict,
+        old_depth = yield store.get_max_depth_of(
+            prev_event_ids,
         )
+        depth = old_depth + 1
 
-    event_id = _event_dict_property("event_id")
-    state_key = _event_dict_property("state_key")
-    type = _event_dict_property("type")
+        event_dict = {
+            "auth_events": auth_events,
+            "prev_events": prev_events,
+            "type": self.type,
+            "room_id": self.room_id,
+            "sender": self.sender,
+            "content": self.content,
+            "unsigned": self.unsigned,
+            "depth": depth,
+            "prev_state": [],
+        }
 
-    def build(self):
-        return FrozenEvent.from_event(self)
+        if self.is_state():
+            event_dict["state_key"] = self._state_key
+
+        if self._redacts is not None:
+            event_dict["redacts"] = self._redacts
+
+        defer.returnValue(
+            self._builder_factory.create_local_event_from_event_dict(
+                self.format_version,
+                event_dict,
+                internal_metadata_dict=self.internal_metadata.get_dict(),
+            )
+        )
 
 
 class EventBuilderFactory(object):
-    def __init__(self, clock, hostname):
-        self.clock = clock
-        self.hostname = hostname
+    def __init__(self, hs):
+        self.clock = hs.get_clock()
+        self.hostname = hs.hostname
+        self.signing_key = hs.config.signing_key[0]
+
+        self.store = hs.get_datastore()
+        self.state = hs.get_state_handler()
+        self.auth = hs.get_auth()
 
         self.event_id_count = 0
 
@@ -85,7 +144,7 @@ class EventBuilderFactory(object):
 
         return e_id.to_string()
 
-    def new(self, room_version, key_values={}):
+    def new(self, room_version, key_values):
         """Generate an event builder appropriate for the given room version
 
         Args:
@@ -98,27 +157,67 @@ class EventBuilderFactory(object):
         """
 
         # There's currently only the one event version defined
-        if room_version not in {
-            RoomVersions.V1,
-            RoomVersions.V2,
-            RoomVersions.VDH_TEST,
-            RoomVersions.STATE_V2_TEST,
-        }:
+        if room_version not in KNOWN_ROOM_VERSIONS:
             raise Exception(
                 "No event format defined for version %r" % (room_version,)
             )
 
         key_values["event_id"] = self.create_event_id()
 
+        return EventBuilder(
+            builder_factory=self,
+            format_version=room_version_to_event_format(room_version),
+            type=key_values["type"],
+            state_key=key_values.get("state_key"),
+            room_id=key_values["room_id"],
+            sender=key_values["sender"],
+            content=key_values.get("content", {}),
+            unsigned=key_values.get("unsigned", {}),
+            redacts=key_values.get("redacts", None),
+        )
+
+    def create_local_event_from_event_dict(self, format_version, event_dict,
+                                           internal_metadata_dict=None):
+        """Takes a fully formed event dict, ensuring that fields like `origin`
+        and `origin_server_ts` have correct values for a locally produced event,
+        then signs and hashes it.
+
+        Args:
+            format_version (int)
+            event_dict (dict)
+            internal_metadata_dict (dict|None)
+
+        Returns:
+            FrozenEvent
+        """
+
+        # There's currently only the one event version defined
+        if format_version not in KNOWN_EVENT_FORMAT_VERSIONS:
+            raise Exception(
+                "No event format defined for version %r" % (format_version,)
+            )
+
+        if internal_metadata_dict is None:
+            internal_metadata_dict = {}
+
         time_now = int(self.clock.time_msec())
 
-        key_values.setdefault("origin", self.hostname)
-        key_values.setdefault("origin_server_ts", time_now)
+        event_dict["event_id"] = self.create_event_id()
 
-        key_values.setdefault("unsigned", {})
-        age = key_values["unsigned"].pop("age", 0)
-        key_values["unsigned"].setdefault("age_ts", time_now - age)
+        event_dict["origin"] = self.hostname
+        event_dict["origin_server_ts"] = time_now
 
-        key_values["signatures"] = {}
+        event_dict.setdefault("unsigned", {})
+        age = event_dict["unsigned"].pop("age", 0)
+        event_dict["unsigned"].setdefault("age_ts", time_now - age)
 
-        return EventBuilder(key_values=key_values,)
+        event_dict.setdefault("signatures", {})
+
+        add_hashes_and_signatures(
+            event_dict,
+            self.hostname,
+            self.signing_key,
+        )
+        return event_type_from_format_version(format_version)(
+            event_dict, internal_metadata_dict=internal_metadata_dict,
+        )
