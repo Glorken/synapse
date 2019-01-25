@@ -23,14 +23,14 @@ from signedjson.sign import sign_json
 from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
-from synapse.events.utils import prune_event
+from synapse.events.utils import prune_event, prune_event_dict
 
 logger = logging.getLogger(__name__)
 
 
 def check_event_content_hash(event, hash_algorithm=hashlib.sha256):
     """Check whether the hash for this PDU matches the contents"""
-    name, expected_hash = compute_content_hash(event, hash_algorithm)
+    name, expected_hash = compute_content_hash(event.get_pdu_json(), hash_algorithm)
     logger.debug("Expecting hash: %s", encode_base64(expected_hash))
 
     # some malformed events lack a 'hashes'. Protect against it being missing
@@ -59,8 +59,8 @@ def check_event_content_hash(event, hash_algorithm=hashlib.sha256):
     return message_hash_bytes == expected_hash
 
 
-def compute_content_hash(event, hash_algorithm):
-    event_json = event.get_pdu_json()
+def compute_content_hash(event_json, hash_algorithm):
+    event_json = dict(event_json)
     event_json.pop("age_ts", None)
     event_json.pop("unsigned", None)
     event_json.pop("signatures", None)
@@ -85,9 +85,8 @@ def compute_event_reference_hash(event, hash_algorithm=hashlib.sha256):
     return (hashed.name, hashed.digest())
 
 
-def compute_event_signature(event, signature_name, signing_key):
-    tmp_event = prune_event(event)
-    redact_json = tmp_event.get_pdu_json()
+def compute_event_signature(event_dict, signature_name, signing_key):
+    redact_json = prune_event_dict(event_dict)
     redact_json.pop("age_ts", None)
     redact_json.pop("unsigned", None)
     logger.debug("Signing event: %s", encode_canonical_json(redact_json))
@@ -96,7 +95,7 @@ def compute_event_signature(event, signature_name, signing_key):
     return redact_json["signatures"]
 
 
-def add_hashes_and_signatures(event, signature_name, signing_key,
+def add_hashes_and_signatures(event_dict, signature_name, signing_key,
                               hash_algorithm=hashlib.sha256):
     # if hasattr(event, "old_state_events"):
     #     state_json_bytes = encode_canonical_json(
@@ -107,14 +106,12 @@ def add_hashes_and_signatures(event, signature_name, signing_key,
     #         hashed.name: encode_base64(hashed.digest())
     #     }
 
-    name, digest = compute_content_hash(event, hash_algorithm=hash_algorithm)
+    name, digest = compute_content_hash(event_dict, hash_algorithm=hash_algorithm)
 
-    if not hasattr(event, "hashes"):
-        event.hashes = {}
-    event.hashes[name] = encode_base64(digest)
+    event_dict.setdefault("hashes", {})[name] = encode_base64(digest)
 
-    event.signatures = compute_event_signature(
-        event,
+    event_dict["signatures"] = compute_event_signature(
+        event_dict,
         signature_name=signature_name,
         signing_key=signing_key,
     )
