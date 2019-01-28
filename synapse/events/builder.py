@@ -38,8 +38,8 @@ class EventBuilder(object):
     """A format independent event builder used to build up the event content
     before signing the event.
 
-    (Note that while this class is frozen, content/unsigned/internal_metadata
-    are still mutable)
+    (Note that while objects of this class are frozen, the
+    content/unsigned/internal_metadata fields are still mutable)
     """
 
     # An EventBuilderFactory
