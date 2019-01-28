@@ -33,7 +33,7 @@ from . import (
 )
 
 
-@attr.s(slots=True, hash=False, frozen=True)
+@attr.s(slots=True, cmp=False, frozen=True)
 class EventBuilder(object):
     """A format independent event builder used to build up the event content
     before signing the event.
