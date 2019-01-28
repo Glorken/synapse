@@ -136,7 +136,7 @@ def add_hashes_and_signatures(event_dict, signature_name, signing_key,
     """Add content hash and sign the event
 
     Args:
-        event_dict (dict): The event as a dict
+        event_dict (dict): The event as a dict to add hashes to and sign
         signature_name (str): The name of the entity signing the event
             (typically the server's hostname).
         signing_key (syutil.crypto.SigningKey): The key to sign with

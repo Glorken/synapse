@@ -124,10 +124,12 @@ def prune_event_dict(event_dict):
     unsigned = {}
     allowed_fields["unsigned"] = unsigned
 
-    if "age_ts" in event_dict["unsigned"]:
-        unsigned["age_ts"] = event_dict["unsigned"]["age_ts"]
-    if "replaces_state" in event_dict["unsigned"]:
-        unsigned["replaces_state"] = event_dict["unsigned"]["replaces_state"]
+    event_unsigned = event_dict.get("unsigned", {})
+
+    if "age_ts" in event_unsigned:
+        unsigned["age_ts"] = event_unsigned["age_ts"]
+    if "replaces_state" in event_unsigned:
+        unsigned["replaces_state"] = event_unsigned["replaces_state"]
 
     return allowed_fields
 
