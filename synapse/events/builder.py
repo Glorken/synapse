@@ -40,10 +40,30 @@ class EventBuilder(object):
 
     (Note that while objects of this class are frozen, the
     content/unsigned/internal_metadata fields are still mutable)
+
+    Attributes:
+        format_version (int): Event format version
+        room_id (str)
+        type (str)
+        sender (str)
+        content (dict)
+        unsigned (dict)
+        internal_metadata (_EventInternalMetadata)
+
+        _state (StateHandler)
+        _auth (synapse.api.Auth)
+        _store (DataStore)
+        _clock (Clock)
+        _hostname (str): The hostname of the server creating the event
+        _signing_key: The signing key to use to sign the event as the server
     """
 
-    # An EventBuilderFactory
-    _builder_factory = attr.ib()
+    _state = attr.ib()
+    _auth = attr.ib()
+    _store = attr.ib()
+    _clock = attr.ib()
+    _hostname = attr.ib()
+    _signing_key = attr.ib()
 
     format_version = attr.ib()
 
@@ -82,19 +102,17 @@ class EventBuilder(object):
             Deferred[FrozenEvent]
         """
 
-        state_ids = yield self._builder_factory.state.get_current_state_ids(
+        state_ids = yield self._state.get_current_state_ids(
             self.room_id, prev_event_ids,
         )
-        auth_ids = yield self._builder_factory.auth.compute_auth_events(
+        auth_ids = yield self._auth.compute_auth_events(
             self, state_ids,
         )
 
-        store = self._builder_factory.store
+        auth_events = yield self._store.add_event_hashes(auth_ids)
+        prev_events = yield self._store.add_event_hashes(prev_event_ids)
 
-        auth_events = yield store.add_event_hashes(auth_ids)
-        prev_events = yield store.add_event_hashes(prev_event_ids)
-
-        old_depth = yield store.get_max_depth_of(
+        old_depth = yield self._store.get_max_depth_of(
             prev_event_ids,
         )
         depth = old_depth + 1
@@ -124,9 +142,9 @@ class EventBuilder(object):
 
         defer.returnValue(
             create_local_event_from_event_dict(
-                clock=self._builder_factory.clock,
-                hostname=self._builder_factory.hostname,
-                signing_key=self._builder_factory.signing_key,
+                clock=self._clock,
+                hostname=self._hostname,
+                signing_key=self._signing_key,
                 format_version=self.format_version,
                 event_dict=event_dict,
                 internal_metadata_dict=self.internal_metadata.get_dict(),
@@ -165,7 +183,12 @@ class EventBuilderFactory(object):
         key_values["event_id"] = _create_event_id(self.clock, self.hostname)
 
         return EventBuilder(
-            builder_factory=self,
+            store=self.store,
+            state=self.state,
+            auth=self.auth,
+            clock=self.clock,
+            hostname=self.hostname,
+            signing_key=self.signing_key,
             format_version=room_version_to_event_format(room_version),
             type=key_values["type"],
             state_key=key_values.get("state_key"),
