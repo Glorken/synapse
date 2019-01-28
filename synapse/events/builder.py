@@ -114,9 +114,12 @@ class EventBuilder(object):
             event_dict["redacts"] = self._redacts
 
         defer.returnValue(
-            self._builder_factory.create_local_event_from_event_dict(
-                self.format_version,
-                event_dict,
+            create_local_event_from_event_dict(
+                clock=self._builder_factory.clock,
+                hostname=self._builder_factory.hostname,
+                signing_key=self._builder_factory.signing_key,
+                format_version=self.format_version,
+                event_dict=event_dict,
                 internal_metadata_dict=self.internal_metadata.get_dict(),
             )
         )
@@ -131,18 +134,6 @@ class EventBuilderFactory(object):
         self.store = hs.get_datastore()
         self.state = hs.get_state_handler()
         self.auth = hs.get_auth()
-
-        self.event_id_count = 0
-
-    def create_event_id(self):
-        i = str(self.event_id_count)
-        self.event_id_count += 1
-
-        local_part = str(int(self.clock.time())) + i + random_string(5)
-
-        e_id = EventID(local_part, self.hostname)
-
-        return e_id.to_string()
 
     def new(self, room_version, key_values):
         """Generate an event builder appropriate for the given room version
@@ -162,7 +153,7 @@ class EventBuilderFactory(object):
                 "No event format defined for version %r" % (room_version,)
             )
 
-        key_values["event_id"] = self.create_event_id()
+        key_values["event_id"] = _create_event_id(self.clock, self.hostname)
 
         return EventBuilder(
             builder_factory=self,
@@ -176,48 +167,80 @@ class EventBuilderFactory(object):
             redacts=key_values.get("redacts", None),
         )
 
-    def create_local_event_from_event_dict(self, format_version, event_dict,
-                                           internal_metadata_dict=None):
-        """Takes a fully formed event dict, ensuring that fields like `origin`
-        and `origin_server_ts` have correct values for a locally produced event,
-        then signs and hashes it.
 
-        Args:
-            format_version (int)
-            event_dict (dict)
-            internal_metadata_dict (dict|None)
+def create_local_event_from_event_dict(clock, hostname, signing_key,
+                                       format_version, event_dict,
+                                       internal_metadata_dict=None):
+    """Takes a fully formed event dict, ensuring that fields like `origin`
+    and `origin_server_ts` have correct values for a locally produced event,
+    then signs and hashes it.
 
-        Returns:
-            FrozenEvent
-        """
+    Args:
+        clock (Clock)
+        hostname (str)
+        signing_key
+        format_version (int)
+        event_dict (dict)
+        internal_metadata_dict (dict|None)
 
-        # There's currently only the one event version defined
-        if format_version not in KNOWN_EVENT_FORMAT_VERSIONS:
-            raise Exception(
-                "No event format defined for version %r" % (format_version,)
-            )
+    Returns:
+        FrozenEvent
+    """
 
-        if internal_metadata_dict is None:
-            internal_metadata_dict = {}
-
-        time_now = int(self.clock.time_msec())
-
-        event_dict["event_id"] = self.create_event_id()
-
-        event_dict["origin"] = self.hostname
-        event_dict["origin_server_ts"] = time_now
-
-        event_dict.setdefault("unsigned", {})
-        age = event_dict["unsigned"].pop("age", 0)
-        event_dict["unsigned"].setdefault("age_ts", time_now - age)
-
-        event_dict.setdefault("signatures", {})
-
-        add_hashes_and_signatures(
-            event_dict,
-            self.hostname,
-            self.signing_key,
+    # There's currently only the one event version defined
+    if format_version not in KNOWN_EVENT_FORMAT_VERSIONS:
+        raise Exception(
+            "No event format defined for version %r" % (format_version,)
         )
-        return event_type_from_format_version(format_version)(
-            event_dict, internal_metadata_dict=internal_metadata_dict,
-        )
+
+    if internal_metadata_dict is None:
+        internal_metadata_dict = {}
+
+    time_now = int(clock.time_msec())
+
+    event_dict["event_id"] = _create_event_id(clock, hostname)
+
+    event_dict["origin"] = hostname
+    event_dict["origin_server_ts"] = time_now
+
+    event_dict.setdefault("unsigned", {})
+    age = event_dict["unsigned"].pop("age", 0)
+    event_dict["unsigned"].setdefault("age_ts", time_now - age)
+
+    event_dict.setdefault("signatures", {})
+
+    add_hashes_and_signatures(
+        event_dict,
+        hostname,
+        signing_key,
+    )
+    return event_type_from_format_version(format_version)(
+        event_dict, internal_metadata_dict=internal_metadata_dict,
+    )
+
+
+# A counter used when generating new event IDs
+_event_id_counter = 0
+
+
+def _create_event_id(clock, hostname):
+    """Create a new event ID
+
+    Args:
+        clock (Clock)
+        hostname (str): The server name for the event ID
+
+    Returns:
+        str
+    """
+
+    global _event_id_counter
+
+    i = str(_event_id_counter)
+    _event_id_counter += 1
+
+    local_part = str(int(clock.time())) + i + random_string(5)
+
+    e_id = EventID(local_part, hostname)
+
+    return e_id.to_string()

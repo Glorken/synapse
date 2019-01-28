@@ -37,7 +37,7 @@ from synapse.api.errors import (
     HttpResponseException,
     SynapseError,
 )
-from synapse.events import room_version_to_event_format
+from synapse.events import builder, room_version_to_event_format
 from synapse.federation.federation_base import FederationBase, event_from_pdu_json
 from synapse.util import logcontext, unwrapFirstError
 from synapse.util.caches.expiringcache import ExpiringCache
@@ -71,7 +71,8 @@ class FederationClient(FederationBase):
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 
-        self.event_builder_factory = hs.get_event_builder_factory()
+        self.hostname = hs.hostname
+        self.signing_key = hs.config.signing_key[0]
 
         self._get_pdu_cache = ExpiringCache(
             cache_name="get_pdu_cache",
@@ -607,8 +608,9 @@ class FederationClient(FederationBase):
             if "prev_state" not in pdu_dict:
                 pdu_dict["prev_state"] = []
 
-            ev = self.event_builder_factory.create_local_event_from_event_dict(
-                event_format, pdu_dict,
+            ev = builder.create_local_event_from_event_dict(
+                self._clock, self.hostname, self.signing_key,
+                format_version=event_format, event_dict=pdu_dict,
             )
 
             defer.returnValue(
