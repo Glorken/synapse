@@ -22,7 +22,7 @@ from canonicaljson import encode_canonical_json, json
 from twisted.internet import defer
 from twisted.internet.defer import succeed
 
-from synapse.api.constants import MAX_DEPTH, EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -541,15 +541,6 @@ class EventCreationHandler(object):
         else:
             prev_events_and_hashes = \
                 yield self.store.get_prev_events_for_room(builder.room_id)
-
-        if prev_events_and_hashes:
-            depth = max([d for _, _, d in prev_events_and_hashes]) + 1
-            # we cap depth of generated events, to ensure that they are not
-            # rejected by other servers (and so that they can be persisted in
-            # the db)
-            depth = min(depth, MAX_DEPTH)
-        else:
-            depth = 1
 
         prev_events = [
             (event_id, prev_hashes)
