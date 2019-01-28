@@ -2278,15 +2278,16 @@ class FederationHandler(BaseHandler):
             room_version = yield self.store.get_room_version(room_id)
             builder = self.event_builder_factory.new(room_version, event_dict)
 
+            EventValidator().validate_builder(builder)
             event, context = yield self.event_creation_handler.create_new_client_event(
                 builder=builder
             )
 
-            EventValidator().validate_new(event)
-
             event, context = yield self.add_display_name_to_third_party_invite(
                 room_version, event_dict, event, context
             )
+
+            EventValidator().validate_new(event)
 
             try:
                 yield self.auth.check_from_context(event, context)
@@ -2373,6 +2374,7 @@ class FederationHandler(BaseHandler):
             # auth check code will explode appropriately.
 
         builder = self.event_builder_factory.new(room_version, event_dict)
+        EventValidator().validate_builder(builder)
         event, context = yield self.event_creation_handler.create_new_client_event(
             builder=builder,
         )

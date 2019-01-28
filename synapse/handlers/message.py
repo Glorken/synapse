@@ -325,6 +325,8 @@ class EventCreationHandler(object):
             prev_events_and_hashes=prev_events_and_hashes,
         )
 
+        self.validator.validate_new(event)
+
         defer.returnValue((event, context))
 
     def _is_exempt_from_privacy_policy(self, builder, requester):
