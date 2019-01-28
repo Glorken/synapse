@@ -59,33 +59,69 @@ def check_event_content_hash(event, hash_algorithm=hashlib.sha256):
     return message_hash_bytes == expected_hash
 
 
-def compute_content_hash(event_json, hash_algorithm):
-    event_json = dict(event_json)
-    event_json.pop("age_ts", None)
-    event_json.pop("unsigned", None)
-    event_json.pop("signatures", None)
-    event_json.pop("hashes", None)
-    event_json.pop("outlier", None)
-    event_json.pop("destinations", None)
+def compute_content_hash(event_dict, hash_algorithm):
+    """Compute the content hash of an event, which is the hash of the
+    unredacted event.
 
-    event_json_bytes = encode_canonical_json(event_json)
+    Args:
+        event_dict (dict): The unredacted event as a dict
+        hash_algorithm: A hasher from `hashlib`, e.g. hashlib.sha256, to use
+            to hash the event
+
+    Returns:
+        tuple[str, bytes]: A tuple of the name of hash and the hash as raw
+        bytes.
+    """
+    event_dict = dict(event_dict)
+    event_dict.pop("age_ts", None)
+    event_dict.pop("unsigned", None)
+    event_dict.pop("signatures", None)
+    event_dict.pop("hashes", None)
+    event_dict.pop("outlier", None)
+    event_dict.pop("destinations", None)
+
+    event_json_bytes = encode_canonical_json(event_dict)
 
     hashed = hash_algorithm(event_json_bytes)
     return (hashed.name, hashed.digest())
 
 
 def compute_event_reference_hash(event, hash_algorithm=hashlib.sha256):
+    """Computes the event reference hash. This is the hash of the redacted
+    event.
+
+    Args:
+        event (FrozenEvent)
+        hash_algorithm: A hasher from `hashlib`, e.g. hashlib.sha256, to use
+            to hash the event
+
+    Returns:
+        tuple[str, bytes]: A tuple of the name of hash and the hash as raw
+        bytes.
+    """
     tmp_event = prune_event(event)
-    event_json = tmp_event.get_pdu_json()
-    event_json.pop("signatures", None)
-    event_json.pop("age_ts", None)
-    event_json.pop("unsigned", None)
-    event_json_bytes = encode_canonical_json(event_json)
+    event_dict = tmp_event.get_pdu_json()
+    event_dict.pop("signatures", None)
+    event_dict.pop("age_ts", None)
+    event_dict.pop("unsigned", None)
+    event_json_bytes = encode_canonical_json(event_dict)
     hashed = hash_algorithm(event_json_bytes)
     return (hashed.name, hashed.digest())
 
 
 def compute_event_signature(event_dict, signature_name, signing_key):
+    """Compute the signature of the event for the given name and key.
+
+    Args:
+        event_dict (dict): The event as a dict
+        signature_name (str): The name of the entity signing the event
+            (typically the server's hostname).
+        signing_key (syutil.crypto.SigningKey): The key to sign with
+
+    Returns:
+        dict[str, dict[str, str]]: Returns a dictionary in the same format of
+        an event's signatures field.
+    """
     redact_json = prune_event_dict(event_dict)
     redact_json.pop("age_ts", None)
     redact_json.pop("unsigned", None)
@@ -97,14 +133,16 @@ def compute_event_signature(event_dict, signature_name, signing_key):
 
 def add_hashes_and_signatures(event_dict, signature_name, signing_key,
                               hash_algorithm=hashlib.sha256):
-    # if hasattr(event, "old_state_events"):
-    #     state_json_bytes = encode_canonical_json(
-    #         [e.event_id for e in event.old_state_events.values()]
-    #     )
-    #     hashed = hash_algorithm(state_json_bytes)
-    #     event.state_hash = {
-    #         hashed.name: encode_base64(hashed.digest())
-    #     }
+    """Add content hash and sign the event
+
+    Args:
+        event_dict (dict): The event as a dict
+        signature_name (str): The name of the entity signing the event
+            (typically the server's hostname).
+        signing_key (syutil.crypto.SigningKey): The key to sign with
+        hash_algorithm: A hasher from `hashlib`, e.g. hashlib.sha256, to use
+            to hash the event
+    """
 
     name, digest = compute_content_hash(event_dict, hash_algorithm=hash_algorithm)
 
